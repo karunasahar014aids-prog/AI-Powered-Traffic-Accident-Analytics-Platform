@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: ai-powered-traffic-accident-analytics
+    runtime: python
+    buildCommand: pip install -r requirements.txt && bash build.sh
+    startCommand: gunicorn app:app
+    autoDeploy: true
