@@ -4,3 +4,4 @@ numpy>=1.26
 scikit-learn>=1.4
 matplotlib>=3.8
 seaborn>=0.13
+gunicorn>=22,<24
