@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Traffic Accident Analytics</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <nav class="nav">
+    <div class="brand">🚦 <span>Traffic<span>IQ</span></span></div>
+    <div class="nav-links"><a href="#dashboard">Dashboard</a><a href="#analytics">Analytics</a><a href="#predict">Prediction</a><a href="#about">About</a></div>
+  </nav>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">AI • MACHINE LEARNING • ROAD SAFETY</p>
+        <h1>AI-Powered Traffic Accident Analytics</h1>
+        <p class="hero-copy">Predict accident severity, explore traffic patterns, and turn road-accident data into actionable safety insights.</p>
+        <a class="primary" href="#predict">Start Prediction →</a>
+      </div>
+      <div class="hero-card"><div class="pulse">● LIVE ANALYTICS</div><strong>{{ "Demo data" if stats.demo_mode else "Dataset connected" }}</strong><p>Intelligent severity analysis dashboard</p></div>
+    </section>
+
+    <section id="dashboard" class="section">
+      <div class="section-head"><div><p class="eyebrow">OVERVIEW</p><h2>Accident Snapshot</h2></div><span class="status">● System ready</span></div>
+      <div class="cards">
+        <div class="stat"><span>Total accidents</span><strong>{{ "{:,}".format(stats.total) }}</strong><small>Records analyzed</small></div>
+        <div class="stat danger"><span>Fatal accidents</span><strong>{{ "{:,}".format(stats.fatal) }}</strong><small>Highest severity</small></div>
+        <div class="stat warning"><span>Serious injury</span><strong>{{ "{:,}".format(stats.serious) }}</strong><small>Priority risk</small></div>
+        <div class="stat safe"><span>Other injury</span><strong>{{ "{:,}".format(stats.other) }}</strong><small>Lower severity</small></div>
+      </div>
+    </section>
+
+    <section id="analytics" class="section">
+      <div class="section-head"><div><p class="eyebrow">DATA INTELLIGENCE</p><h2>Interactive Analytics</h2></div></div>
+      <div class="chart-grid">
+        <div class="chart-card"><h3>Severity Distribution</h3><canvas id="severityChart"></canvas></div>
+        <div class="chart-card"><h3>Accidents by Hour</h3><canvas id="hourChart"></canvas></div>
+        <div class="chart-card"><h3>Accidents by Day</h3><canvas id="dayChart"></canvas></div>
+        <div class="chart-card"><h3>Accidents by Speed Zone</h3><canvas id="speedChart"></canvas></div>
+      </div>
+    </section>
+
+    <section id="predict" class="section prediction-section">
+      <div class="section-head"><div><p class="eyebrow">MACHINE LEARNING</p><h2>Accident Severity Prediction</h2><p>Enter road and traffic conditions to estimate accident severity.</p></div></div>
+      <div class="prediction-layout">
+        <form id="predictionForm" class="form-card">
+          <label>Speed Zone<input name="SPEED_ZONE" type="number" min="0" max="200" value="60" required></label>
+          <label>Accident Type<select name="ACCIDENT_TYPE"><option>Collision</option><option>Single vehicle</option><option>Pedestrian</option><option>Other</option></select></label>
+          <label>Light Condition<select name="LIGHT_CONDITION"><option>Daylight</option><option>Dark</option><option>Dawn/Dusk</option></select></label>
+          <label>Road Geometry<select name="ROAD_GEOMETRY"><option>Straight</option><option>Curve</option><option>Intersection</option><option>Roundabout</option></select></label>
+          <label>Day of Week<select name="DAY_OF_WEEK"><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option></select></label>
+          <label>Hour<input name="HOUR" type="number" min="0" max="23" value="18" required></label>
+          <label>Number of Vehicles<input name="NO_OF_VEHICLES" type="number" min="1" max="100" value="3" required></label>
+          <button class="primary full" type="submit">Predict Severity</button>
+        </form>
+        <div id="result" class="result-card"><div class="result-icon">🔮</div><h3>Prediction Result</h3><p>Submit the form to generate an AI-powered severity prediction.</p></div>
+      </div>
+    </section>
+
+    <section id="about" class="section about">
+      <p class="eyebrow">ABOUT THE PROJECT</p><h2>From accident data to safer decisions.</h2>
+      <div class="about-grid"><div><h3>Features</h3><p>Speed zone, accident type, lighting, road geometry, day, hour, and vehicle count are used to analyze accident severity.</p></div><div><h3>Model</h3><p>Random Forest classification with preprocessing, one-hot encoding, missing-value handling, and balanced class weights.</p></div><div><h3>Purpose</h3><p>Educational and research platform for predictive analytics and road-safety decision support.</p></div></div>
+    </section>
+  </main>
+
+  <footer>AI-Powered Traffic Accident Analytics Platform • Built with Python, Flask & Machine Learning</footer>
+
+<script>
+const stats = {{ stats | tojson }};
+const base = {responsive:true, plugins:{legend:{labels:{color:'#cbd5e1'}}}, scales:{x:{ticks:{color:'#94a3b8'},grid:{color:'rgba(148,163,184,.08)'}},y:{ticks:{color:'#94a3b8'},grid:{color:'rgba(148,163,184,.08)'}}}};
+new Chart(document.getElementById('severityChart'), {type:'doughnut', data:{labels:stats.severity_labels,datasets:[{data:stats.severity_values,borderWidth:0}]}, options:{responsive:true,plugins:{legend:{position:'bottom',labels:{color:'#cbd5e1'}}}}});
+new Chart(document.getElementById('hourChart'), {type:'line',data:{labels:stats.hour_labels,datasets:[{label:'Accidents',data:stats.hour_values,tension:.35,fill:true}]},options:base});
+new Chart(document.getElementById('dayChart'), {type:'bar',data:{labels:stats.day_labels,datasets:[{label:'Accidents',data:stats.day_values,borderRadius:8}]},options:base});
+new Chart(document.getElementById('speedChart'), {type:'bar',data:{labels:stats.speed_labels,datasets:[{label:'Accidents',data:stats.speed_values,borderRadius:8}]},options:base});
+
+document.getElementById('predictionForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const result = document.getElementById('result');
+  result.innerHTML = '<div class="result-icon">⏳</div><h3>Analyzing...</h3><p>Running the machine-learning model.</p>';
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  data.SPEED_ZONE = Number(data.SPEED_ZONE); data.HOUR = Number(data.HOUR); data.NO_OF_VEHICLES = Number(data.NO_OF_VEHICLES);
+  try {
+    const response = await fetch('/predict', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    const out = await response.json();
+    if (!response.ok) throw new Error(out.error || 'Prediction failed');
+    const cls = out.risk === 'High' ? 'high' : out.risk === 'Medium' ? 'medium' : 'low';
+    const probs = Object.entries(out.probabilities || {}).map(([k,v]) => `<div class="prob"><span>${k}</span><b>${v}%</b></div>`).join('');
+    result.innerHTML = `<div class="result-icon">${out.risk==='High'?'🚨':out.risk==='Medium'?'⚠️':'✅'}</div><p class="eyebrow">PREDICTED SEVERITY</p><h3>${out.prediction}</h3><span class="risk ${cls}">${out.risk} Risk</span><div class="probs">${probs}</div><p class="recommendation">${out.recommendation}</p>`;
+  } catch(err) { result.innerHTML = `<div class="result-icon">⚠️</div><h3>Prediction unavailable</h3><p>${err.message}</p><p>Run <code>python train_model.py</code> first.</p>`; }
+});
+</script>
+</body>
+</html>
