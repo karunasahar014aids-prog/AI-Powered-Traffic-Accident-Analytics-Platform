@@ -2,16 +2,15 @@ from pathlib import Path
 import json
 import os
 import pickle
+import subprocess
+import sys
 
 import numpy as np
 import pandas as pd
 from flask import Flask, jsonify, render_template, request
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_CANDIDATES = [
-    BASE_DIR / "data" / "dataset.csv",
-    BASE_DIR / "data" / "victorian_road_crash_data(1).csv",
-]
+DATA_CANDIDATES = [BASE_DIR / "data" / "dataset.csv", BASE_DIR / "data" / "victorian_road_crash_data(1).csv"]
 MODEL_PATH = BASE_DIR / "models" / "accident_severity_model.pkl"
 META_PATH = BASE_DIR / "models" / "model_metadata.json"
 FEATURES = ["SPEED_ZONE", "ACCIDENT_TYPE", "LIGHT_CONDITION", "ROAD_GEOMETRY", "DAY_OF_WEEK", "HOUR", "NO_OF_VEHICLES"]
@@ -20,13 +19,15 @@ app = Flask(__name__)
 
 
 def find_dataset():
-    for path in DATA_CANDIDATES:
-        if path.exists():
-            return path
-    return None
+    return next((p for p in DATA_CANDIDATES if p.exists()), None)
 
 
 def load_model():
+    if not MODEL_PATH.exists():
+        try:
+            subprocess.run([sys.executable, str(BASE_DIR / "train_model.py")], cwd=BASE_DIR, check=True, timeout=900)
+        except Exception:
+            return None
     if not MODEL_PATH.exists():
         return None
     with MODEL_PATH.open("rb") as f:
@@ -58,17 +59,14 @@ def load_data():
     if path is None:
         return make_demo_data(), True
     df = pd.read_csv(path, low_memory=False)
-    missing = [c for c in ["SPEED_ZONE", "ACCIDENT_TYPE", "LIGHT_CONDITION", "ROAD_GEOMETRY", "DAY_OF_WEEK", "NO_OF_VEHICLES", "SEVERITY"] if c not in df.columns]
-    if missing:
-        return make_demo_data(), True
     if "HOUR" not in df.columns and "ACCIDENT_TIME" in df.columns:
         df["HOUR"] = pd.to_datetime(df["ACCIDENT_TIME"].astype(str), errors="coerce").dt.hour
-    if "HOUR" not in df.columns:
-        df["HOUR"] = 0
+    missing = [c for c in FEATURES + [TARGET] if c not in df.columns]
+    if missing:
+        return make_demo_data(), True
     for col in ["SPEED_ZONE", "HOUR", "NO_OF_VEHICLES"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    df = df[FEATURES + [TARGET]].dropna(subset=[TARGET]).copy()
-    return df, False
+    return df[FEATURES + [TARGET]].dropna(subset=[TARGET]).copy(), False
 
 
 def dashboard_data():
@@ -90,7 +88,7 @@ def index():
 def predict():
     model = load_model()
     if model is None:
-        return jsonify({"error": "Model is not trained yet. Run python train_model.py first."}), 503
+        return jsonify({"error": "Model training failed. Check deployment build logs."}), 503
     payload = request.get_json(silent=True) or request.form.to_dict()
     try:
         row = {"SPEED_ZONE": float(payload["SPEED_ZONE"]), "ACCIDENT_TYPE": payload["ACCIDENT_TYPE"], "LIGHT_CONDITION": payload["LIGHT_CONDITION"], "ROAD_GEOMETRY": payload["ROAD_GEOMETRY"], "DAY_OF_WEEK": payload["DAY_OF_WEEK"], "HOUR": int(payload["HOUR"]), "NO_OF_VEHICLES": int(payload["NO_OF_VEHICLES"])}
@@ -101,8 +99,7 @@ def predict():
     probabilities = {}
     if hasattr(model, "predict_proba"):
         probs = model.predict_proba(frame)[0]
-        classes = model.classes_ if hasattr(model, "classes_") else []
-        probabilities = {str(c): round(float(p) * 100, 2) for c, p in zip(classes, probs)}
+        probabilities = {str(c): round(float(p) * 100, 2) for c, p in zip(model.classes_, probs)}
     risk = "High" if "Fatal" in str(prediction) else "Medium" if "Serious" in str(prediction) else "Low"
     recommendation = {"High": "Prioritize emergency response and apply immediate road-safety intervention.", "Medium": "Increase monitoring and consider speed-control and warning measures.", "Low": "Continue routine monitoring and standard road-safety practices."}[risk]
     return jsonify({"prediction": str(prediction), "risk": risk, "probabilities": probabilities, "recommendation": recommendation})
@@ -114,4 +111,4 @@ def api_stats():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
