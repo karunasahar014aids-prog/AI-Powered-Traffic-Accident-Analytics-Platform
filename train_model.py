@@ -13,59 +13,53 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_PATH = BASE_DIR / "data" / "dataset.csv"
+DATA_CANDIDATES = [
+    BASE_DIR / "data" / "dataset.csv",
+    BASE_DIR / "data" / "victorian_road_crash_data(1).csv",
+]
 MODEL_DIR = BASE_DIR / "models"
 MODEL_DIR.mkdir(exist_ok=True)
 MODEL_PATH = MODEL_DIR / "accident_severity_model.pkl"
 META_PATH = MODEL_DIR / "model_metadata.json"
 
-FEATURES = [
-    "SPEED_ZONE",
-    "ACCIDENT_TYPE",
-    "LIGHT_CONDITION",
-    "ROAD_GEOMETRY",
-    "DAY_OF_WEEK",
-    "HOUR",
-    "NO_OF_VEHICLES",
-]
+FEATURES = ["SPEED_ZONE", "ACCIDENT_TYPE", "LIGHT_CONDITION", "ROAD_GEOMETRY", "DAY_OF_WEEK", "HOUR", "NO_OF_VEHICLES"]
 TARGET = "SEVERITY"
 CATEGORICAL = ["ACCIDENT_TYPE", "LIGHT_CONDITION", "ROAD_GEOMETRY", "DAY_OF_WEEK"]
 NUMERIC = ["SPEED_ZONE", "HOUR", "NO_OF_VEHICLES"]
 
 
-def make_demo_data(n=5000, seed=42):
-    rng = np.random.default_rng(seed)
-    speed = rng.choice([30, 40, 50, 60, 70, 80, 100, 110], n)
-    accident_type = rng.choice(["Collision", "Single vehicle", "Pedestrian", "Other"], n)
-    light = rng.choice(["Daylight", "Dark", "Dawn/Dusk"], n)
-    geometry = rng.choice(["Straight", "Curve", "Intersection", "Roundabout"], n)
-    day = rng.choice(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], n)
-    hour = rng.integers(0, 24, n)
-    vehicles = rng.integers(1, 8, n)
-    risk = (speed >= 80).astype(int) + (vehicles >= 4).astype(int) + (light == "Dark").astype(int) + (accident_type == "Pedestrian").astype(int)
-    severity = np.where(risk >= 3, "Fatal accident", np.where(risk >= 1, "Serious injury accident", "Other injury accident"))
-    return pd.DataFrame({
-        "SPEED_ZONE": speed, "ACCIDENT_TYPE": accident_type, "LIGHT_CONDITION": light,
-        "ROAD_GEOMETRY": geometry, "DAY_OF_WEEK": day, "HOUR": hour,
-        "NO_OF_VEHICLES": vehicles, "SEVERITY": severity,
-    })
+def find_dataset():
+    for path in DATA_CANDIDATES:
+        if path.exists():
+            return path
+    return None
 
 
 def load_data():
-    if DATA_PATH.exists():
-        df = pd.read_csv(DATA_PATH)
-        missing = [c for c in FEATURES + [TARGET] if c not in df.columns]
-        if missing:
-            raise ValueError(f"Dataset is missing columns: {missing}")
-        return df[FEATURES + [TARGET]].copy(), False
-    return make_demo_data(), True
+    path = find_dataset()
+    if path is None:
+        raise FileNotFoundError("Dataset not found. Put the CSV in data/dataset.csv")
+
+    df = pd.read_csv(path, low_memory=False)
+    missing = [c for c in ["SPEED_ZONE", "ACCIDENT_TYPE", "LIGHT_CONDITION", "ROAD_GEOMETRY", "DAY_OF_WEEK", "NO_OF_VEHICLES", "SEVERITY"] if c not in df.columns]
+    if missing:
+        raise ValueError(f"Dataset is missing columns: {missing}")
+
+    if "HOUR" not in df.columns:
+        if "ACCIDENT_TIME" not in df.columns:
+            raise ValueError("Dataset needs HOUR or ACCIDENT_TIME")
+        df["HOUR"] = pd.to_datetime(df["ACCIDENT_TIME"].astype(str), errors="coerce").dt.hour
+
+    for col in ["SPEED_ZONE", "HOUR", "NO_OF_VEHICLES"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df = df[FEATURES + [TARGET]].dropna(subset=[TARGET]).copy()
+    return df
 
 
 def main():
-    df, demo_mode = load_data()
-    df = df.dropna(subset=[TARGET])
-    X = df[FEATURES].copy()
-    y = df[TARGET].astype(str)
+    df = load_data()
+    X, y = df[FEATURES], df[TARGET].astype(str)
 
     numeric_pipe = Pipeline([("imputer", SimpleImputer(strategy="median"))])
     categorical_pipe = Pipeline([
@@ -79,7 +73,6 @@ def main():
 
     classifier = RandomForestClassifier(
         n_estimators=250,
-        max_depth=None,
         min_samples_leaf=2,
         class_weight="balanced",
         random_state=42,
@@ -87,9 +80,7 @@ def main():
     )
     model = Pipeline([("preprocessor", preprocessor), ("classifier", classifier)])
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     model.fit(X_train, y_train)
     pred = model.predict(X_test)
 
@@ -100,7 +91,7 @@ def main():
         "f1_macro": round(float(f1_score(y_test, pred, average="macro", zero_division=0)), 4),
         "classes": sorted(y.unique().tolist()),
         "rows": int(len(df)),
-        "demo_mode": demo_mode,
+        "dataset": "Victorian Road Crash Data",
         "classification_report": classification_report(y_test, pred, output_dict=True, zero_division=0),
     }
 
@@ -108,9 +99,8 @@ def main():
         pickle.dump(model, f)
     META_PATH.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 
-    print("\nModel training complete")
+    print("Model training complete")
     print(f"Rows: {len(df):,}")
-    print(f"Demo mode: {demo_mode}")
     print(f"Accuracy: {metrics['accuracy']:.4f}")
     print(f"Macro F1: {metrics['f1_macro']:.4f}")
     print(f"Saved: {MODEL_PATH}")
