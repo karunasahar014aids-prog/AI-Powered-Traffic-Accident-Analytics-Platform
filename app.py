@@ -76,7 +76,56 @@ def dashboard_data():
     day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     by_day = df.groupby("DAY_OF_WEEK").size().reindex(day_order, fill_value=0).tolist()
     speed = df.groupby("SPEED_ZONE").size().sort_index()
-    return {"demo_mode": demo, "total": int(len(df)), "fatal": int(severity.get("Fatal accident", 0)), "serious": int(severity.get("Serious injury accident", 0)), "other": int(severity.get("Other injury accident", 0)), "severity_labels": list(severity.keys()), "severity_values": [int(v) for v in severity.values()], "hour_labels": list(range(24)), "hour_values": by_hour, "day_labels": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], "day_values": by_day, "speed_labels": [str(x) for x in speed.index.tolist()], "speed_values": [int(v) for v in speed.values.tolist()]}
+    accident_type = df.groupby("ACCIDENT_TYPE").size().sort_values(ascending=False).head(8)
+    light = df.groupby("LIGHT_CONDITION").size().sort_values(ascending=False).head(8)
+    return {
+        "demo_mode": demo,
+        "total": int(len(df)),
+        "fatal": int(severity.get("Fatal accident", 0)),
+        "serious": int(severity.get("Serious injury accident", 0)),
+        "other": int(severity.get("Other injury accident", 0)),
+        "severity_labels": list(severity.keys()),
+        "severity_values": [int(v) for v in severity.values()],
+        "hour_labels": list(range(24)),
+        "hour_values": by_hour,
+        "day_labels": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        "day_values": by_day,
+        "speed_labels": [str(x) for x in speed.index.tolist()],
+        "speed_values": [int(v) for v in speed.values.tolist()],
+        "type_labels": [str(x) for x in accident_type.index.tolist()],
+        "type_values": [int(v) for v in accident_type.values.tolist()],
+        "light_labels": [str(x) for x in light.index.tolist()],
+        "light_values": [int(v) for v in light.values.tolist()],
+    }
+
+
+def build_recommendation(risk, row):
+    if risk == "High":
+        text = "High-severity pattern detected. Prioritize emergency response, speed control, and immediate safety intervention."
+    elif risk == "Medium":
+        text = "Medium-severity pattern detected. Increase monitoring and consider warning signs and speed-control measures."
+    else:
+        text = "Lower-severity pattern detected. Continue routine monitoring and standard road-safety practices."
+    if row["LIGHT_CONDITION"].lower() in {"dark", "darkness", "night"}:
+        text += " Reduced-light condition: use additional caution and visibility measures."
+    if row["SPEED_ZONE"] >= 80:
+        text += " Higher speed zone: reinforce speed compliance."
+    return text
+
+
+def explanation_factors(row):
+    factors = []
+    if row["SPEED_ZONE"] >= 80:
+        factors.append("Higher speed zone")
+    if row["NO_OF_VEHICLES"] >= 4:
+        factors.append("Higher vehicle count")
+    if row["LIGHT_CONDITION"].lower() in {"dark", "darkness", "night"}:
+        factors.append("Reduced-light condition")
+    if row["ACCIDENT_TYPE"].lower() == "pedestrian":
+        factors.append("Pedestrian involvement")
+    if not factors:
+        factors.append("Selected road and traffic conditions")
+    return factors
 
 
 @app.route("/")
@@ -101,8 +150,14 @@ def predict():
         probs = model.predict_proba(frame)[0]
         probabilities = {str(c): round(float(p) * 100, 2) for c, p in zip(model.classes_, probs)}
     risk = "High" if "Fatal" in str(prediction) else "Medium" if "Serious" in str(prediction) else "Low"
-    recommendation = {"High": "Prioritize emergency response and apply immediate road-safety intervention.", "Medium": "Increase monitoring and consider speed-control and warning measures.", "Low": "Continue routine monitoring and standard road-safety practices."}[risk]
-    return jsonify({"prediction": str(prediction), "risk": risk, "probabilities": probabilities, "recommendation": recommendation})
+    return jsonify({
+        "prediction": str(prediction),
+        "risk": risk,
+        "probabilities": probabilities,
+        "recommendation": build_recommendation(risk, row),
+        "factors": explanation_factors(row),
+        "input_context": row,
+    })
 
 
 @app.get("/api/stats")
