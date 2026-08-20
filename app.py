@@ -30,8 +30,11 @@ def load_model():
             return None
     if not MODEL_PATH.exists():
         return None
-    with MODEL_PATH.open("rb") as f:
-        return pickle.load(f)
+    try:
+        with MODEL_PATH.open("rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
 
 
 def load_metadata():
@@ -76,8 +79,8 @@ def dashboard_data():
     day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     by_day = df.groupby("DAY_OF_WEEK").size().reindex(day_order, fill_value=0).tolist()
     speed = df.groupby("SPEED_ZONE").size().sort_index()
-    accident_type = df.groupby("ACCIDENT_TYPE").size().sort_values(ascending=False).head(8)
-    light = df.groupby("LIGHT_CONDITION").size().sort_values(ascending=False).head(8)
+    types = df["ACCIDENT_TYPE"].value_counts().head(8)
+    lights = df["LIGHT_CONDITION"].value_counts().head(8)
     return {
         "demo_mode": demo,
         "total": int(len(df)),
@@ -92,40 +95,45 @@ def dashboard_data():
         "day_values": by_day,
         "speed_labels": [str(x) for x in speed.index.tolist()],
         "speed_values": [int(v) for v in speed.values.tolist()],
-        "type_labels": [str(x) for x in accident_type.index.tolist()],
-        "type_values": [int(v) for v in accident_type.values.tolist()],
-        "light_labels": [str(x) for x in light.index.tolist()],
-        "light_values": [int(v) for v in light.values.tolist()],
+        "type_labels": [str(x) for x in types.index.tolist()],
+        "type_values": [int(v) for v in types.values.tolist()],
+        "light_labels": [str(x) for x in lights.index.tolist()],
+        "light_values": [int(v) for v in lights.values.tolist()],
     }
 
 
-def build_recommendation(risk, row):
-    if risk == "High":
-        text = "High-severity pattern detected. Prioritize emergency response, speed control, and immediate safety intervention."
-    elif risk == "Medium":
-        text = "Medium-severity pattern detected. Increase monitoring and consider warning signs and speed-control measures."
-    else:
-        text = "Lower-severity pattern detected. Continue routine monitoring and standard road-safety practices."
-    if row["LIGHT_CONDITION"].lower() in {"dark", "darkness", "night"}:
-        text += " Reduced-light condition: use additional caution and visibility measures."
-    if row["SPEED_ZONE"] >= 80:
-        text += " Higher speed zone: reinforce speed compliance."
-    return text
-
-
-def explanation_factors(row):
+def demo_prediction(row):
+    score = 0
     factors = []
     if row["SPEED_ZONE"] >= 80:
-        factors.append("Higher speed zone")
+        score += 2
+        factors.append("High speed zone")
+    elif row["SPEED_ZONE"] >= 60:
+        score += 1
+        factors.append("Moderate/high speed zone")
     if row["NO_OF_VEHICLES"] >= 4:
-        factors.append("Higher vehicle count")
-    if row["LIGHT_CONDITION"].lower() in {"dark", "darkness", "night"}:
-        factors.append("Reduced-light condition")
-    if row["ACCIDENT_TYPE"].lower() == "pedestrian":
-        factors.append("Pedestrian involvement")
+        score += 1
+        factors.append("Multiple vehicles involved")
+    if row["LIGHT_CONDITION"] == "Dark":
+        score += 1
+        factors.append("Dark lighting condition")
+    if row["ACCIDENT_TYPE"] == "Pedestrian":
+        score += 2
+        factors.append("Pedestrian accident type")
+    if row["ROAD_GEOMETRY"] in {"Intersection", "Roundabout"}:
+        score += 1
+        factors.append("Complex road geometry")
     if not factors:
-        factors.append("Selected road and traffic conditions")
-    return factors
+        factors.append("No elevated-risk input factor detected")
+    prediction = "Fatal accident" if score >= 4 else "Serious injury accident" if score >= 2 else "Other injury accident"
+    risk = "High" if score >= 4 else "Medium" if score >= 2 else "Low"
+    recommendation = {
+        "High": "Prioritize emergency response and apply immediate road-safety intervention.",
+        "Medium": "Increase monitoring and consider speed-control and warning measures.",
+        "Low": "Continue routine monitoring and standard road-safety practices.",
+    }[risk]
+    probabilities = {prediction: 75.0, "Other outcome": 25.0}
+    return prediction, risk, probabilities, recommendation, factors
 
 
 @app.route("/")
@@ -135,14 +143,33 @@ def index():
 
 @app.post("/predict")
 def predict():
-    model = load_model()
-    if model is None:
-        return jsonify({"error": "Model training failed. Check deployment build logs."}), 503
     payload = request.get_json(silent=True) or request.form.to_dict()
     try:
-        row = {"SPEED_ZONE": float(payload["SPEED_ZONE"]), "ACCIDENT_TYPE": payload["ACCIDENT_TYPE"], "LIGHT_CONDITION": payload["LIGHT_CONDITION"], "ROAD_GEOMETRY": payload["ROAD_GEOMETRY"], "DAY_OF_WEEK": payload["DAY_OF_WEEK"], "HOUR": int(payload["HOUR"]), "NO_OF_VEHICLES": int(payload["NO_OF_VEHICLES"])}
+        row = {
+            "SPEED_ZONE": float(payload["SPEED_ZONE"]),
+            "ACCIDENT_TYPE": payload["ACCIDENT_TYPE"],
+            "LIGHT_CONDITION": payload["LIGHT_CONDITION"],
+            "ROAD_GEOMETRY": payload["ROAD_GEOMETRY"],
+            "DAY_OF_WEEK": payload["DAY_OF_WEEK"],
+            "HOUR": int(payload["HOUR"]),
+            "NO_OF_VEHICLES": int(payload["NO_OF_VEHICLES"]),
+        }
     except (KeyError, TypeError, ValueError) as exc:
         return jsonify({"error": f"Invalid input: {exc}"}), 400
+
+    model = load_model()
+    if model is None:
+        prediction, risk, probabilities, recommendation, factors = demo_prediction(row)
+        return jsonify({
+            "prediction": prediction,
+            "risk": risk,
+            "probabilities": probabilities,
+            "recommendation": recommendation,
+            "factors": factors,
+            "mode": "demo",
+            "notice": "Demo fallback is active because the trained model artifact is not available in this deployment.",
+        })
+
     frame = pd.DataFrame([row], columns=FEATURES)
     prediction = model.predict(frame)[0]
     probabilities = {}
@@ -150,14 +177,15 @@ def predict():
         probs = model.predict_proba(frame)[0]
         probabilities = {str(c): round(float(p) * 100, 2) for c, p in zip(model.classes_, probs)}
     risk = "High" if "Fatal" in str(prediction) else "Medium" if "Serious" in str(prediction) else "Low"
-    return jsonify({
-        "prediction": str(prediction),
-        "risk": risk,
-        "probabilities": probabilities,
-        "recommendation": build_recommendation(risk, row),
-        "factors": explanation_factors(row),
-        "input_context": row,
-    })
+    recommendation = {"High": "Prioritize emergency response and apply immediate road-safety intervention.", "Medium": "Increase monitoring and consider speed-control and warning measures.", "Low": "Continue routine monitoring and standard road-safety practices."}[risk]
+    factors = []
+    if row["SPEED_ZONE"] >= 80: factors.append("High speed zone")
+    if row["NO_OF_VEHICLES"] >= 4: factors.append("Multiple vehicles involved")
+    if row["LIGHT_CONDITION"] == "Dark": factors.append("Dark lighting condition")
+    if row["ACCIDENT_TYPE"] == "Pedestrian": factors.append("Pedestrian accident type")
+    if row["ROAD_GEOMETRY"] in {"Intersection", "Roundabout"}: factors.append("Complex road geometry")
+    if not factors: factors.append("Selected road and traffic conditions")
+    return jsonify({"prediction": str(prediction), "risk": risk, "probabilities": probabilities, "recommendation": recommendation, "factors": factors, "mode": "ml"})
 
 
 @app.get("/api/stats")
