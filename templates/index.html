@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Traffic Accident Analytics</title>
+  <title>TrafficIQ — Accident Analytics</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
@@ -21,7 +21,7 @@
         <p class="hero-copy">Predict accident severity, explore traffic patterns, and turn road-accident data into actionable safety insights.</p>
         <a class="primary" href="#predict">Start Prediction →</a>
       </div>
-      <div class="hero-card"><div class="pulse">● LIVE ANALYTICS</div><strong>{{ "Demo data" if stats.demo_mode else "Dataset connected" }}</strong><p>Intelligent severity analysis dashboard</p></div>
+      <div class="hero-card"><div class="pulse">● ANALYTICS</div><strong>{{ "Demo data" if stats.demo_mode else "Dataset connected" }}</strong><p>Intelligent severity analysis dashboard</p></div>
     </section>
 
     <section id="dashboard" class="section">
@@ -35,12 +35,14 @@
     </section>
 
     <section id="analytics" class="section">
-      <div class="section-head"><div><p class="eyebrow">DATA INTELLIGENCE</p><h2>Interactive Analytics</h2></div></div>
+      <div class="section-head"><div><p class="eyebrow">DATA INTELLIGENCE</p><h2>Interactive Analytics</h2><p>Explore severity, time, speed, accident-type and lighting patterns.</p></div></div>
       <div class="chart-grid">
         <div class="chart-card"><h3>Severity Distribution</h3><canvas id="severityChart"></canvas></div>
         <div class="chart-card"><h3>Accidents by Hour</h3><canvas id="hourChart"></canvas></div>
         <div class="chart-card"><h3>Accidents by Day</h3><canvas id="dayChart"></canvas></div>
         <div class="chart-card"><h3>Accidents by Speed Zone</h3><canvas id="speedChart"></canvas></div>
+        <div class="chart-card"><h3>Top Accident Types</h3><canvas id="typeChart"></canvas></div>
+        <div class="chart-card"><h3>Lighting Conditions</h3><canvas id="lightChart"></canvas></div>
       </div>
     </section>
 
@@ -62,8 +64,15 @@
     </section>
 
     <section id="about" class="section about">
-      <p class="eyebrow">ABOUT THE PROJECT</p><h2>From accident data to safer decisions.</h2>
-      <div class="about-grid"><div><h3>Features</h3><p>Speed zone, accident type, lighting, road geometry, day, hour, and vehicle count are used to analyze accident severity.</p></div><div><h3>Model</h3><p>Random Forest classification with preprocessing, one-hot encoding, missing-value handling, and balanced class weights.</p></div><div><h3>Purpose</h3><p>Educational and research platform for predictive analytics and road-safety decision support.</p></div></div>
+      <p class="eyebrow">PROJECT FEATURES</p><h2>From accident data to safer decisions.</h2>
+      <div class="about-grid">
+        <div><h3>🚨 Risk Level</h3><p>Converts the predicted severity class into a simple Low, Medium, or High communication layer.</p></div>
+        <div><h3>💡 Safety Recommendation</h3><p>Provides practical caution guidance based on the predicted severity and selected road conditions.</p></div>
+        <div><h3>🧠 Prediction Context</h3><p>Shows important input conditions used for the prediction. Future versions can add SHAP-based explanations.</p></div>
+        <div><h3>📍 Pattern Analysis</h3><p>Highlights high-frequency patterns by time, speed zone, accident type, and lighting condition.</p></div>
+        <div><h3>📈 Trend Analysis</h3><p>Uses charts to make accident patterns easier to compare across hours and days.</p></div>
+        <div><h3>🛡️ Road Safety</h3><p>Designed as an educational decision-support platform for traffic safety analytics.</p></div>
+      </div>
     </section>
   </main>
 
@@ -76,6 +85,8 @@ new Chart(document.getElementById('severityChart'), {type:'doughnut', data:{labe
 new Chart(document.getElementById('hourChart'), {type:'line',data:{labels:stats.hour_labels,datasets:[{label:'Accidents',data:stats.hour_values,tension:.35,fill:true}]},options:base});
 new Chart(document.getElementById('dayChart'), {type:'bar',data:{labels:stats.day_labels,datasets:[{label:'Accidents',data:stats.day_values,borderRadius:8}]},options:base});
 new Chart(document.getElementById('speedChart'), {type:'bar',data:{labels:stats.speed_labels,datasets:[{label:'Accidents',data:stats.speed_values,borderRadius:8}]},options:base});
+new Chart(document.getElementById('typeChart'), {type:'bar',data:{labels:stats.type_labels,datasets:[{label:'Accidents',data:stats.type_values,borderRadius:8}]},options:{...base,indexAxis:'y'}});
+new Chart(document.getElementById('lightChart'), {type:'doughnut',data:{labels:stats.light_labels,datasets:[{data:stats.light_values,borderWidth:0}]},options:{responsive:true,plugins:{legend:{position:'bottom',labels:{color:'#cbd5e1'}}}}});
 
 document.getElementById('predictionForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -89,8 +100,9 @@ document.getElementById('predictionForm').addEventListener('submit', async (e) =
     if (!response.ok) throw new Error(out.error || 'Prediction failed');
     const cls = out.risk === 'High' ? 'high' : out.risk === 'Medium' ? 'medium' : 'low';
     const probs = Object.entries(out.probabilities || {}).map(([k,v]) => `<div class="prob"><span>${k}</span><b>${v}%</b></div>`).join('');
-    result.innerHTML = `<div class="result-icon">${out.risk==='High'?'🚨':out.risk==='Medium'?'⚠️':'✅'}</div><p class="eyebrow">PREDICTED SEVERITY</p><h3>${out.prediction}</h3><span class="risk ${cls}">${out.risk} Risk</span><div class="probs">${probs}</div><p class="recommendation">${out.recommendation}</p>`;
-  } catch(err) { result.innerHTML = `<div class="result-icon">⚠️</div><h3>Prediction unavailable</h3><p>${err.message}</p><p>Run <code>python train_model.py</code> first.</p>`; }
+    const factors = (out.factors || []).map(x => `<li>${x}</li>`).join('');
+    result.innerHTML = `<div class="result-icon">${out.risk==='High'?'🚨':out.risk==='Medium'?'⚠️':'✅'}</div><p class="eyebrow">PREDICTED SEVERITY</p><h3>${out.prediction}</h3><span class="risk ${cls}">${out.risk} Risk</span><div class="probs">${probs}</div><div class="explain"><strong>Important factors</strong><ul>${factors}</ul></div><p class="recommendation">${out.recommendation}</p>`;
+  } catch(err) { result.innerHTML = `<div class="result-icon">⚠️</div><h3>Prediction unavailable</h3><p>${err.message}</p><p>Check the deployment model artifact and build logs.</p>`; }
 });
 </script>
 </body>
